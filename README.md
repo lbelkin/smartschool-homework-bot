@@ -7,6 +7,8 @@ At 16:00 it reads tomorrow's lessons, looks up Webtop homework recorded since th
 ## Features
 
 - Handles recurring ICS lessons and exceptions (`RRULE`, `RDATE`, `EXDATE`, `RECURRENCE-ID`).
+- Reads the current timetable directly from Webtop, with an optional private ICS fallback.
+- Exports a selected Webtop timetable range as a private standards-compliant ICS file.
 - Checks the interval since the previous lesson, including assignments entered on another day.
 - Deduplicates assignments and groups repeated lessons of one subject.
 - Sends Hebrew messages with subject, next lesson time, Webtop lesson date and assignment text.
@@ -59,6 +61,45 @@ For daily execution, copy `com.example.school-homework.plist`, replace the `REPL
 
 Set `LOCAL_SCHEDULE` or `KEYCHAIN_ACCOUNT` to override the default file or Keychain account.
 
+## Timetable sources
+
+Set `SCHEDULE_SOURCE` to one of:
+
+- `webtop` — require the live Webtop timetable API; fail if it is unavailable.
+- `ics` — use only `SCHEDULE_URI`.
+- `auto` — try Webtop first and fall back to `SCHEDULE_URI` if the timetable request or response validation fails. This is the default.
+
+Webtop timetable access uses the private, undocumented `PupilCard/GetPupilScheduale` endpoint. The parser accepts only dated weekly data with valid day indexes and explicit lesson times. Cancelled lessons are omitted. Because Smart School can change this API without notice, keep a current private ICS fallback for unattended operation.
+
+Both homework and the live timetable depend on the same temporary `webToken`. ICS fallback can preserve timetable availability when only the timetable endpoint fails, but it cannot restore homework access after the token expires.
+
+## Export Webtop timetable to ICS
+
+With `WEBTOP_WEB_TOKEN` and `WEBTOP_STUDENT` present in the environment, export the current and next eight weeks:
+
+```bash
+.venv/bin/python export_webtop_ics.py --output "$HOME/.local/share/school-homework/webtop-schedule.ics"
+```
+
+On macOS, the exporter can read those two values from Keychain instead:
+
+```bash
+.venv/bin/python export_webtop_ics.py \
+  --keychain-account school-homework-bot \
+  --output "$HOME/Library/Application Support/school-homework/webtop-schedule.ics"
+```
+
+Use `--weeks-before` and `--weeks-after` to choose a range. The exporter requests each week from Webtop, validates it, writes atomically, and sets the resulting file mode to `600`. The file contains subjects, lesson times, teachers and rooms, so keep it private. All `*.ics` files are ignored by Git.
+
+To use the exported file as the bot's fallback:
+
+```bash
+SCHEDULE_SOURCE='auto'
+SCHEDULE_URI='/absolute/private/path/to/webtop-schedule.ics'
+```
+
+Exporting is a snapshot, not a subscription. Run the exporter again to capture later timetable changes. It is subject to the same token-expiry limitation as live schedule reads.
+
 ## Linux/Unix cron option
 
 The repository includes `run_cron.sh` for systems without macOS `launchd`. It resolves the project directory dynamically, so it contains no machine-specific path. Create a private configuration outside the repository:
@@ -109,6 +150,7 @@ python deploy.py --project your-project-id \
 
 ```bash
 python -m compileall -q .
+python -m unittest -v test_schedule.py
 .venv/bin/python run_local.py --validate
 ```
 

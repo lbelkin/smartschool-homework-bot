@@ -2,5 +2,5 @@ FROM python:3.12-slim
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY bot.py webtop_api.py ./
+COPY bot.py webtop_api.py export_webtop_ics.py ./
 CMD ["python", "bot.py"]

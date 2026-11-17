@@ -9,6 +9,7 @@ venv/
 __pycache__/
 *.py[cod]
 *.log
+*.ics
 data/
 work/
 .DS_Store

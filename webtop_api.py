@@ -1,6 +1,7 @@
 import hashlib
 import os
-from datetime import date, datetime, timedelta
+import re
+from datetime import date, datetime, time, timedelta
 from urllib.parse import unquote
 from zoneinfo import ZoneInfo
 
@@ -35,6 +36,51 @@ def parse_week(days):
     return tasks, dates
 
 
+def parse_hour_name(value):
+    matches = re.findall(r'(?<!\d)([01]?\d|2[0-3]):([0-5]\d)(?!\d)', clean(value))
+    if not matches:
+        raise ValueError('Schedule hour has no start time')
+    values = [time(int(hour), int(minute)) for hour, minute in matches]
+    return values[0], values[1] if len(values) > 1 else None
+
+
+def cancelled(entry, hour):
+    changes = list(hour.get('changes') or []) + list(entry.get('changes') or [])
+    return any(change.get('isClassCancel') is True or
+               clean(change.get('definition')) == 'ביטול שיעור'
+               for change in changes if isinstance(change, dict))
+
+
+def parse_schedule_week(days, sunday):
+    if not isinstance(days, list):
+        raise ValueError('Missing schedule week')
+    lessons = []
+    for day in days:
+        if not isinstance(day, dict):
+            raise ValueError('Invalid schedule day')
+        day_index = day.get('dayIndex', day.get('day', day.get('dayId')))
+        if not isinstance(day_index, int) or not 1 <= day_index <= 7:
+            raise ValueError('Invalid schedule day index')
+        lesson_date = sunday + timedelta(days=day_index - 1)
+        for hour in day.get('hoursData') or []:
+            starts_at, ends_at = parse_hour_name(hour.get('hourName'))
+            entries = hour.get('scheduale', hour.get('schedule')) or []
+            if not isinstance(entries, list):
+                raise ValueError('Invalid schedule entries')
+            for entry in entries:
+                if not isinstance(entry, dict) or cancelled(entry, hour):
+                    continue
+                subject = clean(entry.get('subject') or entry.get('subject_name'))
+                if not subject:
+                    continue
+                start = datetime.combine(lesson_date, starts_at, ZoneInfo('Asia/Jerusalem'))
+                end = datetime.combine(lesson_date, ends_at, ZoneInfo('Asia/Jerusalem')) if ends_at else start + timedelta(minutes=45)
+                lessons.append(dict(subject=subject, start=start, end=end,
+                                    teacher=clean(entry.get('teacherPrivateName')) + (' ' if entry.get('teacherPrivateName') and entry.get('teacherLastName') else '') + clean(entry.get('teacherLastName')),
+                                    location=clean(entry.get('room'))))
+    return lessons
+
+
 class Client:
     def __init__(self, token):
         self.session = requests.Session()
@@ -53,7 +99,7 @@ class Client:
             raise RuntimeError('Webtop session or request rejected')
         return body['data']
 
-    def homework(self, expected_name, weeks):
+    def student(self, expected_name):
         dashboard = self.post('dashboard/InitDashboard', {})
         students = dashboard if isinstance(dashboard, list) else dashboard['childrens']
         matches = []
@@ -65,7 +111,10 @@ class Client:
                 matches.append(student)
         if len(matches) != 1:
             raise ValueError('Cannot uniquely identify requested student')
-        student = matches[0]
+        return matches[0]
+
+    def homework(self, expected_name, weeks):
+        student = self.student(expected_name)
         params = dict(studentID=student['id'], classCode=student['classCode'],
                       studyYear=student.get('studyYear'), studentName=expected_name, moduleID=11, viewType=0)
         if any(params[key] is None for key in ('studentID', 'classCode')):
@@ -82,6 +131,30 @@ class Client:
             tasks.update((task['id'], task) for task in parsed)
         return list(tasks.values())
 
+    def schedule(self, expected_name, start, end):
+        student = self.student(expected_name)
+        required = ('id', 'classCode', 'studyYear')
+        if any(student.get(key) is None for key in required):
+            raise ValueError('Missing current student schedule parameters')
+        today = datetime.now(ZoneInfo('Asia/Jerusalem')).date()
+        current_sunday = today - timedelta(days=(today.weekday() + 1) % 7)
+        first_sunday = start.date() - timedelta(days=(start.date().weekday() + 1) % 7)
+        last_date = (end - timedelta(microseconds=1)).date()
+        last_sunday = last_date - timedelta(days=(last_date.weekday() + 1) % 7)
+        lessons = {}
+        sunday = first_sunday
+        while sunday <= last_sunday:
+            week_index = (sunday - current_sunday).days // 7
+            payload = dict(weekIndex=week_index, viewType=0, studyYear=student['studyYear'],
+                           studentID=student['id'], classCode=student['classCode'], moduleID=10)
+            data = self.post('PupilCard/GetPupilScheduale', payload)
+            for lesson in parse_schedule_week(data, sunday):
+                if start <= lesson['start'] < end:
+                    key = (lesson['start'], lesson['subject'], lesson['teacher'], lesson['location'])
+                    lessons[key] = lesson
+            sunday += timedelta(days=7)
+        return sorted(lessons.values(), key=lambda item: item['start'])
+
     def close(self):
         self.session.close()
 
@@ -90,5 +163,13 @@ def fetch_homework():
     client = Client(os.environ['WEBTOP_WEB_TOKEN'])
     try:
         return client.homework(os.environ['WEBTOP_STUDENT'], int(os.getenv('LOOKBACK_WEEKS', '4')))
+    finally:
+        client.close()
+
+
+def fetch_schedule(start, end):
+    client = Client(os.environ['WEBTOP_WEB_TOKEN'])
+    try:
+        return client.schedule(os.environ['WEBTOP_STUDENT'], start, end)
     finally:
         client.close()

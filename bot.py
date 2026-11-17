@@ -42,7 +42,7 @@ def parse_tables(html):
     return tasks
 
 
-from webtop_api import fetch_homework
+from webtop_api import fetch_homework, fetch_schedule
 
 
 def parse_lessons(payload, start, end):
@@ -63,7 +63,7 @@ def parse_lessons(payload, start, end):
     return sorted(lessons, key=lambda lesson: lesson['start'])
 
 
-def fetch_lessons(start, end):
+def fetch_ics_lessons(start, end):
     from pathlib import Path
     source = os.environ['SCHEDULE_URI']
     if source.startswith('gs://'):
@@ -83,6 +83,25 @@ def fetch_lessons(start, end):
         version = hashlib.sha256(payload).hexdigest()[:12]
         updated = datetime.fromtimestamp(path.stat().st_mtime, TZ).strftime('%d.%m.%Y')
     return parse_lessons(payload, start, end), f'מערכת שעות: קובץ שהועלה ב־{updated}, גרסה {version}. שינויים נכללים לאחר העלאת קובץ חדש.'
+
+
+def fetch_lessons(start, end):
+    source = os.getenv('SCHEDULE_SOURCE', 'auto').lower()
+    if source not in ('auto', 'webtop', 'ics'):
+        raise ValueError('SCHEDULE_SOURCE must be auto, webtop, or ics')
+    if source in ('auto', 'webtop'):
+        try:
+            lessons = fetch_schedule(start, end)
+            if not lessons:
+                raise ValueError('Webtop schedule is empty')
+            return lessons, 'מערכת שעות: נטענה ישירות מ־Webtop.'
+        except Exception:
+            if source == 'webtop':
+                raise
+    if not os.getenv('SCHEDULE_URI'):
+        raise RuntimeError('ICS fallback requires SCHEDULE_URI')
+    lessons, information = fetch_ics_lessons(start, end)
+    return lessons, information + ' המקור החלופי הופעל לאחר כשל ב־Webtop.' if source == 'auto' else information
 
 
 def tomorrow_agenda(tasks, lessons, tomorrow, coverage_start):
