@@ -19,6 +19,12 @@ This repository contains no Webtop session, student name, Telegram token/chat ID
 
 Required secrets are `WEBTOP_WEB_TOKEN`, `WEBTOP_STUDENT`, `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`. Never commit them. `.gitignore` excludes `.env`, `data/`, token files, logs and virtual environments. Webtop sessions expire and must be replaced manually; this project does not bypass CAPTCHA or Cloudflare.
 
+### Important Webtop token limitation
+
+`WEBTOP_WEB_TOKEN` is a temporary authenticated browser-session cookie, not a durable API key. Smart School does not provide this project with a supported refresh-token flow, an expiry timestamp, or a non-interactive login API. The token can therefore stop working without advance notice and the next run will fail with an authentication error (typically HTTP 401).
+
+Renewal is deliberately manual: sign in through a normal browser, obtain the new `webToken` from your own authenticated session, and replace the stored secret. Headless browser login may be rejected by Cloudflare, and this project neither bypasses that protection nor stores the Webtop password. Cron, `launchd`, Cloud Run, and geographic hosting do not remove this limitation. Monitor failures and plan for periodic manual token replacement.
+
 ## Local macOS setup
 
 Requires Python 3.11+.
