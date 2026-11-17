@@ -131,7 +131,8 @@ def report(agenda, tomorrow, coverage_start):
     lines = [f"שיעורי בית למחר · {tomorrow.strftime('%d.%m.%Y')}"]
     with_homework = [item for item in agenda if item['tasks']]
     for item in with_homework:
-        hours = ', '.join(lesson['start'].strftime('%H:%M') for lesson in item['lessons'])
+        hours = ', '.join(lesson['start'].strftime('%H:%M') if lesson.get('time_known', True)
+                          else f"שיעור {lesson['period']}" for lesson in item['lessons'])
         lines.append(f"\n{item['subject']} · {hours}")
         if item['previous']:
             lines.append(f"השיעור הקודם לפי המערכת: {item['previous']:%d.%m.%Y}")

@@ -71,6 +71,10 @@ Set `SCHEDULE_SOURCE` to one of:
 
 Webtop timetable access uses the private, undocumented `PupilCard/GetPupilScheduale` endpoint. The parser accepts only dated weekly data with valid day indexes and explicit lesson times. Cancelled lessons are omitted. Because Smart School can change this API without notice, keep a current private ICS fallback for unattended operation.
 
+Some dashboard responses omit the academic year. In that case the client derives the Israeli school-year start from the current Jerusalem date (August–December use the current year; January–July use the previous year). Set `WEBTOP_STUDY_YEAR` to override it if the school's API uses a different value.
+
+Some schools return lesson numbers but set every `hourName` to `null`. The bot does not invent bell times: Telegram then displays `Lesson N`, and ICS export creates an all-day event containing the lesson number. To produce timed events, provide the school's confirmed bell schedule as JSON, for example `WEBTOP_PERIOD_TIMES='{"1":"08:00-08:45","2":"08:50-09:35"}'`. Only configure times verified by the school or an authoritative timetable.
+
 Both homework and the live timetable depend on the same temporary `webToken`. ICS fallback can preserve timetable availability when only the timetable endpoint fails, but it cannot restore homework access after the token expires.
 
 ## Export Webtop timetable to ICS

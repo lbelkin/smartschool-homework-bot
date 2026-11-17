@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import re
 from datetime import date, datetime, time, timedelta
@@ -37,6 +38,8 @@ def parse_week(days):
 
 
 def parse_hour_name(value):
+    if not clean(value):
+        return None, None
     matches = re.findall(r'(?<!\d)([01]?\d|2[0-3]):([0-5]\d)(?!\d)', clean(value))
     if not matches:
         raise ValueError('Schedule hour has no start time')
@@ -51,7 +54,8 @@ def cancelled(entry, hour):
                for change in changes if isinstance(change, dict))
 
 
-def parse_schedule_week(days, sunday):
+def parse_schedule_week(days, sunday, period_times=None):
+    period_times = period_times or {}
     if not isinstance(days, list):
         raise ValueError('Missing schedule week')
     lessons = []
@@ -63,10 +67,18 @@ def parse_schedule_week(days, sunday):
             raise ValueError('Invalid schedule day index')
         lesson_date = sunday + timedelta(days=day_index - 1)
         for hour in day.get('hoursData') or []:
-            starts_at, ends_at = parse_hour_name(hour.get('hourName'))
             entries = hour.get('scheduale', hour.get('schedule')) or []
             if not isinstance(entries, list):
                 raise ValueError('Invalid schedule entries')
+            period = hour.get('hour')
+            starts_at, ends_at = parse_hour_name(hour.get('hourName'))
+            if starts_at is None and str(period) in period_times:
+                starts_at, ends_at = parse_hour_name(period_times[str(period)])
+            time_known = starts_at is not None
+            if not time_known:
+                if not isinstance(period, int) or period < 1:
+                    raise ValueError('Schedule entry has neither time nor lesson number')
+                starts_at = time(0, min(period, 59))
             for entry in entries:
                 if not isinstance(entry, dict) or cancelled(entry, hour):
                     continue
@@ -76,6 +88,7 @@ def parse_schedule_week(days, sunday):
                 start = datetime.combine(lesson_date, starts_at, ZoneInfo('Asia/Jerusalem'))
                 end = datetime.combine(lesson_date, ends_at, ZoneInfo('Asia/Jerusalem')) if ends_at else start + timedelta(minutes=45)
                 lessons.append(dict(subject=subject, start=start, end=end,
+                                    period=period, time_known=time_known,
                                     teacher=clean(entry.get('teacherPrivateName')) + (' ' if entry.get('teacherPrivateName') and entry.get('teacherLastName') else '') + clean(entry.get('teacherLastName')),
                                     location=clean(entry.get('room'))))
     return lessons
@@ -133,22 +146,31 @@ class Client:
 
     def schedule(self, expected_name, start, end):
         student = self.student(expected_name)
-        required = ('id', 'classCode', 'studyYear')
+        required = ('id', 'classCode')
         if any(student.get(key) is None for key in required):
             raise ValueError('Missing current student schedule parameters')
         today = datetime.now(ZoneInfo('Asia/Jerusalem')).date()
+        study_year = student.get('studyYear') or os.getenv('WEBTOP_STUDY_YEAR')
+        if study_year is None:
+            study_year = today.year if today.month >= 8 else today.year - 1
+        study_year = int(study_year)
+        if not 2000 <= study_year <= 2100:
+            raise ValueError('Invalid Webtop study year')
         current_sunday = today - timedelta(days=(today.weekday() + 1) % 7)
         first_sunday = start.date() - timedelta(days=(start.date().weekday() + 1) % 7)
         last_date = (end - timedelta(microseconds=1)).date()
         last_sunday = last_date - timedelta(days=(last_date.weekday() + 1) % 7)
         lessons = {}
+        period_times = json.loads(os.getenv('WEBTOP_PERIOD_TIMES', '{}'))
+        if not isinstance(period_times, dict):
+            raise ValueError('WEBTOP_PERIOD_TIMES must be a JSON object')
         sunday = first_sunday
         while sunday <= last_sunday:
             week_index = (sunday - current_sunday).days // 7
-            payload = dict(weekIndex=week_index, viewType=0, studyYear=student['studyYear'],
+            payload = dict(weekIndex=week_index, viewType=0, studyYear=study_year,
                            studentID=student['id'], classCode=student['classCode'], moduleID=10)
             data = self.post('PupilCard/GetPupilScheduale', payload)
-            for lesson in parse_schedule_week(data, sunday):
+            for lesson in parse_schedule_week(data, sunday, period_times):
                 if start <= lesson['start'] < end:
                     key = (lesson['start'], lesson['subject'], lesson['teacher'], lesson['location'])
                     lessons[key] = lesson

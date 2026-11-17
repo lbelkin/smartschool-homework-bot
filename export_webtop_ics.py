@@ -25,10 +25,19 @@ def calendar_bytes(lessons):
         event.add('uid', hashlib.sha256(identity.encode()).hexdigest()[:32] + '@webtop.local')
         event.add('dtstamp', datetime.now(TZ))
         event.add('summary', lesson['subject'])
-        event.add('dtstart', lesson['start'])
-        event.add('dtend', lesson['end'])
+        if lesson.get('time_known', True):
+            event.add('dtstart', lesson['start'])
+            event.add('dtend', lesson['end'])
+        else:
+            event.add('dtstart', lesson['start'].date())
+            event.add('dtend', lesson['start'].date() + timedelta(days=1))
+        description = []
+        if lesson.get('period'):
+            description.append(f"Lesson {lesson['period']}")
         if lesson['teacher']:
-            event.add('description', lesson['teacher'])
+            description.append(lesson['teacher'])
+        if description:
+            event.add('description', '\n'.join(description))
         if lesson['location']:
             event.add('location', lesson['location'])
         calendar.add_component(event)
