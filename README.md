@@ -53,6 +53,32 @@ For daily execution, copy `com.example.school-homework.plist`, replace the `REPL
 
 Set `LOCAL_SCHEDULE` or `KEYCHAIN_ACCOUNT` to override the default file or Keychain account.
 
+## Linux/Unix cron option
+
+The repository includes `run_cron.sh` for systems without macOS `launchd`. It resolves the project directory dynamically, so it contains no machine-specific path. Create a private configuration outside the repository:
+
+```bash
+install -m 600 config.example.env "$HOME/.config/school-homework-bot.env"
+# Edit the copied file locally and fill every required value.
+```
+
+Use an absolute private path for `SCHEDULE_URI`. Keep the ICS and environment file out of the repository. Test the same command cron will execute:
+
+```bash
+BOT_ENV_FILE="$HOME/.config/school-homework-bot.env" ./run_cron.sh
+```
+
+Then run `crontab -e` and add the following, replacing both example paths with paths on that machine:
+
+```cron
+CRON_TZ=Asia/Jerusalem
+0 16 * * * BOT_ENV_FILE=/home/your-user/.config/school-homework-bot.env /opt/school-homework-bot/run_cron.sh >> /home/your-user/.local/state/school-homework-bot.log 2>&1
+```
+
+This runs daily at 16:00 Jerusalem time on cron implementations that support `CRON_TZ` (such as Cronie). Otherwise configure the host timezone to `Asia/Jerusalem` or convert the schedule carefully; daylight-saving changes make a fixed UTC time unsafe. Ensure the log directory exists and only its owner can read it. The host must be on and online at the scheduled time; classic cron does not catch up missed runs.
+
+`BOT_PYTHON` may point to another virtual-environment Python executable. The helper refuses a secrets file whose mode is not exactly `600`.
+
 ## Optional GCP deployment
 
 `config.example.env` contains placeholders only. Cloud deployment expects the four secrets in Secret Manager and a private `gs://` ICS object. Review `deploy.py` before `--apply`; it creates billable resources.

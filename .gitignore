@@ -2,6 +2,7 @@ webtop-token.txt
 .env
 .env.*
 !.env.example
+*.secrets
 .login-venv/
 .venv/
 venv/
